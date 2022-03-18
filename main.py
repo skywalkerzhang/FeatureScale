@@ -59,6 +59,7 @@ def get_train_data(path, sep=','):
     df = pd.read_csv(path, sep=sep)
     # 每个仓库根据月份求日销售的和
     # new_df = pd.DataFrame(columns=['shop_id', 'item_id', 'date_block_num', 'item_cnt_month'])
+    df = feature_link(df)
     data_group = df.groupby(['shop_id', 'item_id', 'date_block_num'])['item_cnt_day'].sum()
     new_df = data_group.reset_index()
     new_df = new_df.rename(columns={'item_cnt_day': 'item_cnt_month'})
@@ -68,6 +69,7 @@ def get_train_data(path, sep=','):
 
 def generate_testset(path, sep=','):
     df = pd.read_csv(path, sep=sep)
+    df = feature_link(df)
     return df
 
 
@@ -76,8 +78,32 @@ def get_tensor(X):
 
 
 # link the feature for both training set and test set
-def feature_link(data):
-    pass
+def feature_link(data: pd.DataFrame):
+    # all names need one-hot encoding
+    # Link name
+    shop_info = pd.read_csv(f'./competitive-data-science-predict-future-sales/shops.csv')
+    shop_info = shop_info.set_index(['shop_id'])
+    shop_info = shop_info['shop_name']
+    shop_info = shop_info.to_dict()
+    data['shop_name'] = data['shop_id'].apply(lambda x: shop_info[x])
+
+    # Link item name and cid
+    item_info = pd.read_csv(f'./competitive-data-science-predict-future-sales/items.csv')
+    item_info = item_info.set_index(['item_id'])
+    item_name = item_info['item_name']
+    item_cid = item_info['item_category_id']
+    item_name = item_name.to_dict()
+    item_cid = item_cid.to_dict()
+    data['item_name'] = data['item_id'].apply(lambda x: item_name[x])
+    data['item_category_id'] = data['item_id'].apply(lambda x: item_cid[x])
+
+    # Link item c name
+    item_categories_info = pd.read_csv(f'./competitive-data-science-predict-future-sales/item_categories.csv')
+    item_categories_info = item_categories_info.set_index(['item_category_id'])
+    item_categories_info = item_categories_info['item_category_name']
+    item_categories_info = item_categories_info.to_dict()
+    data['item_category_name'] = data['item_category_id'].apply(lambda x: item_categories_info[x])
+    return data
 
 
 # 给测试集用的，用来做商品价格预测，看是否影响销量
@@ -98,8 +124,8 @@ def train_val_split(X, ratio=0.7):
     return train_test_split(X, train_size=ratio)
 
 
-def train(my_train_set, device, epochs=100, lr=0.01, weight_decay=1e-5):
-    net = Net(3, 1)
+def train(my_train_set, device, features, epochs=100, lr=0.01, weight_decay=1e-5):
+    net = Net(features, 1)
     net.to(device)
     # 使用adam作为有偶花旗
     optimizer = optim.Adam(net.parameters(), lr=lr, weight_decay=weight_decay)
@@ -151,8 +177,11 @@ def test(test_x, net, device):
 
 if __name__ == '__main__':
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    # set random state
+    torch.cuda.manual_seed(1)
 
     train_set = get_train_data(f'./competitive-data-science-predict-future-sales/sales_train.csv')
+
     # 划分训练集和测试集
     train_set, val_set = train_val_split(train_set)
 
@@ -168,7 +197,8 @@ if __name__ == '__main__':
 
     # loss nan学习率太高
     # cur best epochs=10, lr=0.001, batch_size=256
-    net = train(train_loader, device, epochs=15, lr=0.001)
+    features = 7
+    net = train(train_loader, device, features, epochs=15, lr=0.001)
     net.to(device)
 
     # 验证
