@@ -10,6 +10,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
 from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import LabelEncoder
 import numpy as np
 
 
@@ -60,10 +61,11 @@ def get_train_data(path, sep=','):
     # 每个仓库根据月份求日销售的和
     # new_df = pd.DataFrame(columns=['shop_id', 'item_id', 'date_block_num', 'item_cnt_month'])
     df = feature_link(df)
-    data_group = df.groupby(['shop_id', 'item_id', 'date_block_num'])['item_cnt_day'].sum()
+    data_group = df.groupby(['shop_id', 'item_id', 'date_block_num', 'place', 'item_name', 'item_category_id', 'item_category_name'])['item_cnt_day'].sum()
     new_df = data_group.reset_index()
     new_df = new_df.rename(columns={'item_cnt_day': 'item_cnt_month'})
     # 后续考虑是否需要item price
+    new_df = new_df.drop('date_block_num', axis=1)
     return new_df
 
 
@@ -85,7 +87,8 @@ def feature_link(data: pd.DataFrame):
     shop_info = shop_info.set_index(['shop_id'])
     shop_info = shop_info['shop_name']
     shop_info = shop_info.to_dict()
-    data['shop_name'] = data['shop_id'].apply(lambda x: shop_info[x])
+    data['place'] = data['shop_id'].apply(lambda x: shop_info[x])
+    data['place'] = data['place'].apply(lambda x: x.split(' ')[0])
 
     # Link item name and cid
     item_info = pd.read_csv(f'./competitive-data-science-predict-future-sales/items.csv')
@@ -95,6 +98,7 @@ def feature_link(data: pd.DataFrame):
     item_name = item_name.to_dict()
     item_cid = item_cid.to_dict()
     data['item_name'] = data['item_id'].apply(lambda x: item_name[x])
+    data['item_name'] = data['item_name'].apply(lambda x: x.split(" ")[0])
     data['item_category_id'] = data['item_id'].apply(lambda x: item_cid[x])
 
     # Link item c name
@@ -103,6 +107,13 @@ def feature_link(data: pd.DataFrame):
     item_categories_info = item_categories_info['item_category_name']
     item_categories_info = item_categories_info.to_dict()
     data['item_category_name'] = data['item_category_id'].apply(lambda x: item_categories_info[x])
+    data['item_category_name'] = data['item_category_name'].apply(lambda x: x.split("-")[0])
+
+    # get all name label encoder
+    enc = LabelEncoder()
+    data['place'] = enc.fit_transform(data['place'])
+    data['item_category_name'] = enc.fit_transform(data['item_category_name'])
+    data['item_name'] = enc.fit_transform(data['item_name'])
     return data
 
 
@@ -193,12 +204,12 @@ if __name__ == '__main__':
     train_loader = DataLoader(train_set, batch_size=256, shuffle=False, num_workers=0)
 
     test_set = generate_testset(f'./competitive-data-science-predict-future-sales/test.csv')
-    test_set = get_tensor(test_set)
+    test_set = get_tensor(test_set)[:, 1:]
 
     # loss nan学习率太高
     # cur best epochs=10, lr=0.001, batch_size=256
-    features = 7
-    net = train(train_loader, device, features, epochs=15, lr=0.001)
+    features = 6
+    net = train(train_loader, device, features, epochs=10, lr=0.001)
     net.to(device)
 
     # 验证
